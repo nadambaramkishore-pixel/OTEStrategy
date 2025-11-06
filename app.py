@@ -624,7 +624,7 @@ data_source = st.sidebar.selectbox("Data Source", ["Offline File", "Live MT5"])
 
 # --- ROBUST FOLDER/FILE CHECKING ---
 offline_symbols = []
-data_dir = './data'
+data_dir = './'
 app_ready = True
 
 if not os.path.exists(data_dir):
@@ -797,4 +797,5 @@ if app_ready:
 
         st.info("Configuration set. Click 'Start Backtest' in the sidebar to run your analysis.")
         
+
 
