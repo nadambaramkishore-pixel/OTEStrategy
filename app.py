@@ -68,8 +68,10 @@ def get_symbol_info(symbol):
     point = info.point
     if "XAU" in symbol or "XAG" in symbol:
         pip_size = 0.01
-    elif symbol in ["BTCUSD", "ETHUSD"]:
+    elif symbol in ["BTCUSD"]:
          pip_size = 0.01
+    elif symbol in ["ETHUSD"]:
+         pip_size = 0.0001
     elif info.digits == 5 or info.digits == 3:
         pip_size = point * 10
     else:
@@ -78,8 +80,10 @@ def get_symbol_info(symbol):
     # --- Determine Lot Value (Corrected) ---
     if symbol == "XAUUSD":
         lot_value_per_point = 100.0
-    elif symbol in ["BTCUSD", "ETHUSD"]:
+    elif symbol in ["BTCUSD""]:
         lot_value_per_point = 1.0 # 1 lot = 1 coin, $1 move = $1 profit
+    elif symbol in ["ETHUSD"]:
+        lot_value_per_point = 10.0 
     elif "USD" in symbol: # Forex
         lot_value_per_point = 100000.0
     else:
@@ -716,17 +720,17 @@ if app_ready:
                 if symbol_info is None:
                     st.warning(f"Could not get symbol info for {symbol} (MT5 not connected?). Using fallback defaults for lot sizing.")
                     
-                    # --- **** CRYPTO FIX (v3): Correct fallback logic **** ---
-                     if symbol == "XAUUSD":
-                        symbol_info = {'pip_size': 0.01, 'point': 0.01, 'lot_value_per_point': 100.0, 'digits': 2}
-                    elif symbol in ["BTCUSD"]: # Crypto
-                         symbol_info = {'pip_size': 0.01, 'point': 0.01, 'lot_value_per_point': 1.0, 'digits': 2}
-                    elif symbol in ["ETHUSD"]: # Crypto
-                         symbol_info = {'pip_size': 0.01, 'point': 0.0001, 'lot_value_per_point': 10.0, 'digits': 2}
-                    elif "USD" in symbol: # Forex
-                        symbol_info = {'pip_size': 0.0001, 'point': 0.00001, 'lot_value_per_point': 100000.0, 'digits': 5}
-                    else: # Other fallback
-                         symbol_info = {'pip_size': 0.01, 'point': 0.01, 'lot_value_per_point': 1.0, 'digits': 2}
+                 # --- **** CRYPTO FIX (v3): Correct fallback logic **** ---
+                if symbol == "XAUUSD":
+                    symbol_info = {'pip_size': 0.01, 'point': 0.01, 'lot_value_per_point': 100.0, 'digits': 2}
+                elif symbol in ["BTCUSD"]: # Crypto
+                    symbol_info = {'pip_size': 0.01, 'point': 0.01, 'lot_value_per_point': 1.0, 'digits': 2}
+                elif symbol in ["ETHUSD"]: # Crypto
+                    symbol_info = {'pip_size': 0.01, 'point': 0.0001, 'lot_value_per_point': 10.0, 'digits': 2}
+                elif "USD" in symbol: # Forex
+                    symbol_info = {'pip_size': 0.0001, 'point': 0.00001, 'lot_value_per_point': 100000.0, 'digits': 5}
+                else: # Other fallback
+                    symbol_info = {'pip_size': 0.01, 'point': 0.01, 'lot_value_per_point': 1.0, 'digits': 2}
                 
                 # 3. Run Backtest
                 trades_df = run_backtest(
