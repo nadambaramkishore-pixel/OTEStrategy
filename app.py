@@ -31,25 +31,25 @@ st.set_page_config(
 # -----------------------------------------------------------------
 
 @st.cache_resource
-def connect_mt5():
-    """Initializes connection to MT5"""
-    if not mt5.initialize():
-        print(f"MT5 initialize failed: {mt5.last_error()}")
-        return False
-    print("MetaTrader 5 Initialized")
-    return True
+# def connect_mt5():
+#     """Initializes connection to MT5"""
+#     if not mt5.initialize():
+#         print(f"MT5 initialize failed: {mt5.last_error()}")
+#         return False
+#     print("MetaTrader 5 Initialized")
+#     return True
 
 @st.cache_data
-def get_symbol_info(symbol):
-    """Gets symbol info and caches it."""
-    print(f"Getting symbol info for {symbol}...")
-    if not connect_mt5():
-        return None
+# def get_symbol_info(symbol):
+#     """Gets symbol info and caches it."""
+#     print(f"Getting symbol info for {symbol}...")
+#     if not connect_mt5():
+#         return None
 
-    info = mt5.symbol_info(symbol)
-    if info is None:
-        print(f"Could not get symbol info for {symbol}")
-        return None
+#     info = mt5.symbol_info(symbol)
+#     if info is None:
+#         print(f"Could not get symbol info for {symbol}")
+#         return None
         
     point = info.point
     if "XAU" in symbol or "XAG" in symbol:
@@ -81,35 +81,35 @@ def get_symbol_info(symbol):
 # DATA LOADING FUNCTIONS
 # -----------------------------------------------------------------
 
-def fetch_mt5_data(symbol, timeframe, months):
-    """Fetches live data from MT5."""
-    if not connect_mt5():
-        st.error("Could not connect to MetaTrader 5. Please ensure the terminal is running.")
-        return None, None
+# def fetch_mt5_data(symbol, timeframe, months):
+#     """Fetches live data from MT5."""
+#     if not connect_mt5():
+#         st.error("Could not connect to MetaTrader 5. Please ensure the terminal is running.")
+#         return None, None
 
-    tf_map = {"M5": mt5.TIMEFRAME_M5, "M15": mt5.TIMEFRAME_M15, "H1": mt5.TIMEFRAME_H1}
-    mt5_timeframe = tf_map.get(timeframe, mt5.TIMEFRAME_M5)
+#     tf_map = {"M5": mt5.TIMEFRAME_M5, "M15": mt5.TIMEFRAME_M15, "H1": mt5.TIMEFRAME_H1}
+#     mt5_timeframe = tf_map.get(timeframe, mt5.TIMEFRAME_M5)
 
-    end = datetime.now(timezone.utc)
-    # Fetch extra 2 months for indicator warmup
-    total_months_to_fetch = months + 2
-    start = end - timedelta(days=30 * total_months_to_fetch)
+#     end = datetime.now(timezone.utc)
+#     # Fetch extra 2 months for indicator warmup
+#     total_months_to_fetch = months + 2
+#     start = end - timedelta(days=30 * total_months_to_fetch)
     
-    test_start_date = end - timedelta(days=30 * months)
+#     test_start_date = end - timedelta(days=30 * months)
     
-    rates = mt5.copy_rates_range(symbol, mt5_timeframe, start, end)
+#     rates = mt5.copy_rates_range(symbol, mt5_timeframe, start, end)
     
-    if rates is None or len(rates) == 0:
-        st.error("No data fetched from MT5. Check symbol or MT5 connection.")
-        return None, None
+#     if rates is None or len(rates) == 0:
+#         st.error("No data fetched from MT5. Check symbol or MT5 connection.")
+#         return None, None
 
-    df = pd.DataFrame(rates)
-    df['time'] = pd.to_datetime(df['time'], unit='s', utc=True)
-    df = df[['time', 'open', 'high', 'low', 'close', 'tick_volume']]
-    df.rename(columns={'tick_volume': 'volume'}, inplace=True)
-    df.set_index('time', inplace=True)
+#     df = pd.DataFrame(rates)
+#     df['time'] = pd.to_datetime(df['time'], unit='s', utc=True)
+#     df = df[['time', 'open', 'high', 'low', 'close', 'tick_volume']]
+#     df.rename(columns={'tick_volume': 'volume'}, inplace=True)
+#     df.set_index('time', inplace=True)
     
-    return df, test_start_date
+#     return df, test_start_date
 
 def load_offline_data(symbol, timeframe):
     """Loads data from a pre-exported CSV file."""
@@ -797,5 +797,6 @@ if app_ready:
 
         st.info("Configuration set. Click 'Start Backtest' in the sidebar to run your analysis.")
         
+
 
 
