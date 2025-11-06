@@ -80,7 +80,7 @@ def get_symbol_info(symbol):
     # --- Determine Lot Value (Corrected) ---
     if symbol == "XAUUSD":
         lot_value_per_point = 100.0
-    elif symbol in ["BTCUSD""]:
+    elif symbol in ["BTCUSD"]:
         lot_value_per_point = 1.0 # 1 lot = 1 coin, $1 move = $1 profit
     elif symbol in ["ETHUSD"]:
         lot_value_per_point = 10.0 
@@ -819,3 +819,4 @@ if app_ready:
 
     else:
         st.info("Configuration set. Click 'Start Backtest' in the sidebar to run your analysis.")
+
