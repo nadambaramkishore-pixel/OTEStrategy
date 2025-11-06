@@ -68,7 +68,9 @@ def get_symbol_info(symbol):
     point = info.point
     if "XAU" in symbol or "XAG" in symbol:
         pip_size = 0.01
-    elif symbol in ["BTCUSD", "ETHUSD"]:
+    elif symbol in ["BTCUSD"]:
+         pip_size = 0.01
+    elif symbol in ["ETHUSD"]:
          pip_size = 0.01
     elif info.digits == 5 or info.digits == 3:
         pip_size = point * 10
@@ -803,3 +805,4 @@ if app_ready:
 
     else:
         st.info("Configuration set. Click 'Start Backtest' in the sidebar to run your analysis.")
+
