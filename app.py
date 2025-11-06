@@ -1,21 +1,32 @@
 # app.py
-# OTE Strategy Dashboard v2.0
+# OTE Strategy Dashboard v2.4 (Streamlit Cloud Fix)
 #
 # To run:
 # 1. Make sure MT5 terminal is running (for Live Mode)
 # 2. Open terminal in this folder
 # 3. Run: streamlit run app.py
 
-#import MetaTrader5 as mt5
+import streamlit as st
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta, timezone, time
 import plotly.graph_objects as go
 import plotly.express as px
-import streamlit as st
 import os
 import matplotlib.pyplot as plt
 import mplfinance as mpf
+
+# --- **** THIS IS THE FIX **** ---
+# Try to import MetaTrader5. If it fails (like on Streamlit Cloud),
+# set a flag and continue.
+try:
+    import MetaTrader5 as mt5
+    MT5_ENABLED = True
+except ImportError:
+    print("MetaTrader5 library not found. Running in Offline-Only mode.")
+    MT5_ENABLED = False
+# --- **** END OF FIX **** ---
+
 
 # -----------------------------------------------------------------
 # PAGE CONFIG
@@ -31,44 +42,52 @@ st.set_page_config(
 # -----------------------------------------------------------------
 
 @st.cache_resource
-# def connect_mt5():
-#     """Initializes connection to MT5"""
-#     if not mt5.initialize():
-#         print(f"MT5 initialize failed: {mt5.last_error()}")
-#         return False
-#     print("MetaTrader 5 Initialized")
-#     return True
+def connect_mt5():
+    """Initializes connection to MT5"""
+    if not MT5_ENABLED:
+        return False
+    
+    if not mt5.initialize():
+        print(f"MT5 initialize failed: {mt5.last_error()}")
+        return False
+    print("MetaTrader 5 Initialized")
+    return True
 
 @st.cache_data
-# def get_symbol_info(symbol):
-#     """Gets symbol info and caches it."""
-#     print(f"Getting symbol info for {symbol}...")
-#     if not connect_mt5():
-#         return None
+def get_symbol_info(symbol):
+    """Gets symbol info and caches it."""
+    print(f"Getting symbol info for {symbol}...")
+    if not MT5_ENABLED or not connect_mt5():
+        return None # Return None if MT5 isn't running or available
 
-#     info = mt5.symbol_info(symbol)
-#     if info is None:
-#         print(f"Could not get symbol info for {symbol}")
-#         return None
+    info = mt5.symbol_info(symbol)
+    if info is None:
+        print(f"Could not get symbol info for {symbol}")
+        return None
         
     point = info.point
     if "XAU" in symbol or "XAG" in symbol:
         pip_size = 0.01
+    elif symbol in ["BTCUSD", "ETHUSD"]:
+         pip_size = 0.01
     elif info.digits == 5 or info.digits == 3:
         pip_size = point * 10
     else:
         pip_size = point
 
-    if info.trade_tick_value == 0 or info.trade_tick_size == 0:
-        if "XAU" in symbol:
-            lot_value_per_point = 100.0
-        # --- FIX for Crypto/Other ---
-        elif symbol in ["BTCUSD", "ETHUSD"]:
-            lot_value_per_point = 1.0 # 1 lot = 1 coin, $1 move = $1 profit
-        else: # Forex
-            lot_value_per_point = 100000.0
+    # --- Determine Lot Value (Corrected) ---
+    if symbol == "XAUUSD":
+        lot_value_per_point = 100.0
+    elif symbol in ["BTCUSD", "ETHUSD"]:
+        lot_value_per_point = 1.0 # 1 lot = 1 coin, $1 move = $1 profit
+    elif "USD" in symbol: # Forex
+        lot_value_per_point = 100000.0
     else:
-        lot_value_per_point = info.trade_tick_value / info.trade_tick_size
+        # Fallback
+        if info.trade_tick_value != 0 and info.trade_tick_size != 0:
+            lot_value_per_point = info.trade_tick_value / info.trade_tick_size
+        else:
+             lot_value_per_point = 1.0
         
     return {
         'pip_size': pip_size,
@@ -81,45 +100,44 @@ st.set_page_config(
 # DATA LOADING FUNCTIONS
 # -----------------------------------------------------------------
 
-# def fetch_mt5_data(symbol, timeframe, months):
-#     """Fetches live data from MT5."""
-#     if not connect_mt5():
-#         st.error("Could not connect to MetaTrader 5. Please ensure the terminal is running.")
-#         return None, None
+def fetch_mt5_data(symbol, timeframe, months):
+    """Fetches live data from MT5."""
+    if not MT5_ENABLED or not connect_mt5():
+        st.error("Could not connect to MetaTrader 5. Please ensure the terminal is running.")
+        return None, None
 
-#     tf_map = {"M5": mt5.TIMEFRAME_M5, "M15": mt5.TIMEFRAME_M15, "H1": mt5.TIMEFRAME_H1}
-#     mt5_timeframe = tf_map.get(timeframe, mt5.TIMEFRAME_M5)
+    tf_map = {"M5": mt5.TIMEFRAME_M5, "M15": mt5.TIMEFRAME_M15, "H1": mt5.TIMEFRAME_H1}
+    mt5_timeframe = tf_map.get(timeframe, mt5.TIMEFRAME_M5)
 
-#     end = datetime.now(timezone.utc)
-#     # Fetch extra 2 months for indicator warmup
-#     total_months_to_fetch = months + 2
-#     start = end - timedelta(days=30 * total_months_to_fetch)
+    end = datetime.now(timezone.utc)
+    total_months_to_fetch = months + 2
+    start = end - timedelta(days=30 * total_months_to_fetch)
+    test_start_date = end - timedelta(days=30 * months)
     
-#     test_start_date = end - timedelta(days=30 * months)
+    rates = mt5.copy_rates_range(symbol, mt5_timeframe, start, end)
     
-#     rates = mt5.copy_rates_range(symbol, mt5_timeframe, start, end)
-    
-#     if rates is None or len(rates) == 0:
-#         st.error("No data fetched from MT5. Check symbol or MT5 connection.")
-#         return None, None
+    if rates is None or len(rates) == 0:
+        st.error("No data fetched from MT5. Check symbol or MT5 connection.")
+        return None, None
 
-#     df = pd.DataFrame(rates)
-#     df['time'] = pd.to_datetime(df['time'], unit='s', utc=True)
-#     df = df[['time', 'open', 'high', 'low', 'close', 'tick_volume']]
-#     df.rename(columns={'tick_volume': 'volume'}, inplace=True)
-#     df.set_index('time', inplace=True)
+    df = pd.DataFrame(rates)
+    df['time'] = pd.to_datetime(df['time'], unit='s', utc=True)
+    df = df[['time', 'open', 'high', 'low', 'close', 'tick_volume']]
+    df.rename(columns={'tick_volume': 'volume'}, inplace=True)
+    df.set_index('time', inplace=True)
     
-#     return df, test_start_date
+    return df, test_start_date
 
 def load_offline_data(symbol, timeframe):
     """Loads data from a pre-exported CSV file."""
-    filename = f"./{symbol}_{timeframe}.csv"
+    # --- FIX: Look in current folder (./), not ./data/ ---
+    filename = f"{symbol}_{timeframe}.csv" 
     if not os.path.exists(filename):
-        st.error(f"Data file not found: {filename}. Please export it and place it in the 'data' folder.")
+        st.error(f"Data file not found: {filename}. Please make sure it's in the same folder as app.py.")
         return None, None
         
     try:
-        # --- FIX v10: Use comma delimiter and latin1 encoding ---
+        # Use delimiter=',' and encoding='latin1'
         print(f"Reading {filename} with delimiter=',' and encoding='latin1'")
         df = pd.read_csv(
             filename,
@@ -130,7 +148,7 @@ def load_offline_data(symbol, timeframe):
         # --- Fix column names (remove potential brackets/spaces and make UPPER) ---
         df.columns = df.columns.str.strip().str.replace('[<>]', '', regex=True).str.upper()
 
-        # --- FIX: Use TIME column only. Do NOT require DATE. ---
+        # --- Use TIME column as timestamp, do not require DATE ---
         if 'TIME' not in df.columns:
             st.error(f"Error: CSV file {filename} is missing the 'TIME' column. Found columns: {list(df.columns)}")
             return None, None
@@ -251,7 +269,7 @@ def lot_size_mt5( symbol_info, entry, sl, balance, risk_pct ):
 
 
 def run_backtest( df, params, symbol_info, test_start_date, require_fvg=False ):
-    print("Running backtest...")
+    print("Running OTE backtest...")
     df = df.copy()
     df['ATR'] = compute_atr(df, params['atr_period'])
     df['EMA_TREND'] = df['close'].ewm(span=params['ema_trend_period'], adjust=False).mean()
@@ -438,7 +456,6 @@ def calculate_insights(df_trades, initial_equity):
     df_trades['drawdown_usd'] = df_trades['equity_curve'] - df_trades['peak']
     max_drawdown_usd = df_trades['drawdown_usd'].min()
     
-    # Make sure timestamps are naive for duration calculation
     df_trades['entry_time_naive'] = pd.to_datetime(df_trades['entry_time']).dt.tz_localize(None)
     df_trades['exit_time_naive'] = pd.to_datetime(df_trades['exit_time']).dt.tz_localize(None)
     df_trades['duration'] = (df_trades['exit_time_naive'] - df_trades['entry_time_naive'])
@@ -499,40 +516,40 @@ def create_charts(insights):
     
     return charts
 
-# --- **** THIS IS THE CORRECTED FUNCTION **** ---
 @st.cache_data
-def plot_trade_chart( df, trade, symbol ):
+def plot_trade_chart( _df_full, trade_data_dict, symbol ):
     """Generates the labeled mplfinance chart for a single trade."""
     
-    # Convert trade times to UTC to match the main DataFrame's timezone
+    trade = pd.Series(trade_data_dict)
+    
+    # Convert trade times (which are naive) back to UTC to match the main DF
     entry_time = pd.to_datetime(trade['entry_time']).tz_localize('UTC')
     exit_time = pd.to_datetime(trade['exit_time']).tz_localize('UTC')
 
-    # --- **** THIS IS THE FIX (v11) **** ---
-    # 1. Find bar index locations (in *main* df)
-    # We must use get_indexer with method='nearest'
     try:
-        pos_entry = df.index.get_loc(entry_time)
-    except Exception:
-        pos_entry = df.index.get_indexer([entry_time], method='nearest')[0]
+        pos_entry = _df_full.index.get_loc(entry_time, method='nearest')
+    except KeyError:
+        pos_entry = _df_full.index.get_indexer([entry_time], method='nearest')[0]
+
+    try:
+        pos_exit = _df_full.index.get_loc(exit_time, method='nearest')
+    except KeyError:
+        pos_exit = _df_full.index.get_indexer([exit_time], method='nearest')[0]
+
+    left = max(0, pos_entry - 30)
+    right = min(len(_df_full) - 1, pos_exit + 15)
+    seg = _df_full.iloc[left:right + 1].copy()
+
+    try:
+        entry_idx_local = seg.index.get_loc(entry_time, method='nearest')
+    except KeyError:
+        entry_idx_local = seg.index.get_indexer([entry_time], method='nearest')[0]
         
     try:
-        pos_exit = df.index.get_loc(exit_time)
-    except Exception:
-        pos_exit = df.index.get_indexer([exit_time], method='nearest')[0]
-
-    # Widen chart area to make space for labels
-    left = max(0, pos_entry - 30)
-    right = min(len(df) - 1, pos_exit + 15)
-    seg = df.iloc[left:right + 1].copy()
-
-    # 2. Find local index for plotting (in *seg* df)
-    # The local index is just the global position minus the start of the segment.
-    entry_idx_local = pos_entry - left
-    exit_idx_local = pos_exit - left
-    # --- **** END OF FIX **** ---
-
-    # --- 1. Prepare Fib lines ---
+        exit_idx_local = seg.index.get_loc(exit_time, method='nearest')
+    except KeyError:
+        exit_idx_local = seg.index.get_indexer([exit_time], method='nearest')[0]
+    
     hlines_to_plot = []
     hcolors = []
     hstyles = []
@@ -540,18 +557,17 @@ def plot_trade_chart( df, trade, symbol ):
     swing_low = trade.get('swing_low')
     swing_high = trade.get('swing_high')
     
-    fib_levels_data = [] # To store (level, label, color, style)
+    fib_levels_data = []
     
     if swing_low and swing_high:
         swing_range = swing_high - swing_low
         
-        # # This is your (flawed but profitable) "Buy Premium" logic
         # fib_levels_data = [
-            # (swing_low, f"Swing Low (0.0)", '#E53935', '--'),
-            # (swing_low + swing_range * 0.5, "0.5", '#1E88E5', 'dotted'),
-            # (swing_low + swing_range * 0.618, "0.618 (OTE)", '#4CAF50', 'dotted'),
-            # (swing_low + swing_range * 0.786, "0.786 (OTE)", '#4CAF50', 'dotted'),
-            # (swing_high, f"Swing High (1.0)", '#E53935', '--')
+        #     (swing_low, f"Swing Low (0.0)", '#E53935', '--'),
+        #     (swing_low + swing_range * 0.5, "0.5", '#1E88E5', 'dotted'),
+        #     (swing_low + swing_range * 0.618, "0.618 (OTE)", '#4CAF50', 'dotted'),
+        #     (swing_low + swing_range * 0.786, "0.786 (OTE)", '#4CAF50', 'dotted'),
+        #     (swing_high, f"Swing High (1.0)", '#E53935', '--')
         # ]
         
         for level, _, color, style in fib_levels_data:
@@ -559,12 +575,11 @@ def plot_trade_chart( df, trade, symbol ):
             hcolors.append(color)
             hstyles.append(style)
     
-    # --- 2. Create the plot ---
     fig, axlist = mpf.plot(
         seg,
         type='candle',
         style='yahoo',
-        figsize=(12, 6), # Made chart wider for labels
+        figsize=(12, 6),
         returnfig=True,
         volume=False,
         show_nontrading=False,
@@ -572,44 +587,36 @@ def plot_trade_chart( df, trade, symbol ):
     )
     ax = axlist[0]
     
-    # --- 3. Add TP/SL zones (Green/Red) ---
     region_start = entry_idx_local
     region_end = exit_idx_local
     
     ax.fill_between([region_start, region_end], trade['entry'], trade['tp'], color='#0f9d58', alpha=0.1)
     ax.fill_between([region_start, region_end], trade['entry'], trade['sl'], color='#db4437', alpha=0.1)
 
-    # --- 4. Add Entry/Exit markers (on top of zones) ---
     ax.scatter(entry_idx_local, trade['entry'], marker='^' if trade['side'] == 'BUY' else 'v', s=100, color='#4285f4',
                edgecolors='black', zorder=10)
     ax.scatter(exit_idx_local, trade['exit'], marker='x', s=80, color='orange', edgecolors='black', zorder=10)
 
-    # --- 5. Add Text Labels ---
-    label_x_pos = len(seg) - 0.5 # Position for text labels on the right
+    label_x_pos = len(seg) - 0.5
     
-    # Add Fib labels
     for level, label, color, _ in fib_levels_data:
         ax.text(label_x_pos, level, f" {label}", 
                 color=color, va='center', ha='left', fontsize=9, fontweight='bold')
                 
-    # Add SL/TP labels
     ax.text(label_x_pos, trade['tp'], f" TP ({trade['tp']:.2f})", 
             color='#0f9d58', va='center', ha='left', fontsize=9, fontweight='bold')
     ax.text(label_x_pos, trade['sl'], f" SL ({trade['sl']:.2f})", 
             color='#db4437', va='center', ha='left', fontsize=9, fontweight='bold')
 
-    # --- 6. Format and save ---
     tick_indices = np.linspace(0, len(seg) - 1, 6, dtype=int)
     ax.set_xticks(tick_indices)
     ax.set_xticklabels([seg.index[i].strftime('%m-%d\n%H:%M') for i in tick_indices])
     
-    # Adjust x-axis limits to make space for labels
-    ax.set_xlim(-1, len(seg) + 3) # Add padding to the right
-
+    ax.set_xlim(-1, len(seg) + 3)
     ax.set_ylabel(f'Price ({symbol})')
     fig.tight_layout()
     
-    return fig # Return the figure object
+    return fig
 
 # -----------------------------------------------------------------
 # STREAMLIT APP UI
@@ -620,28 +627,41 @@ st.title("⚡ OTE Liquidity Sweep Strategy Dashboard")
 # --- SIDEBAR INPUTS ---
 st.sidebar.header("Backtest Configuration")
 
-data_source = st.sidebar.selectbox("Data Source", ["Offline File", "Live MT5"])
+# --- **** FIX: Only show 'Live MT5' if the library imported successfully **** ---
+data_source_options = ["Offline File"]
+if MT5_ENABLED:
+    data_source_options.append("Live MT5")
+
+data_source = st.sidebar.selectbox("Data Source", data_source_options)
+if data_source == "Live MT5" and not MT5_ENABLED:
+    st.sidebar.error("Live MT5 mode is not available (library failed to import).")
+    st.stop()
+# --- **** END OF FIX **** ---
 
 # --- ROBUST FOLDER/FILE CHECKING ---
 offline_symbols = []
-data_dir = './'
+data_dir = './' # --- FIX: Look in current folder, not /data
 app_ready = True
 
 if not os.path.exists(data_dir):
     st.sidebar.error(f"Error: The 'data' subfolder was not found. Please create it.")
     st.error("The './data' subfolder is missing. Please create it in the same directory as 'app.py' and add your CSV files.")
     app_ready = False
-elif not os.path.isdir(data_dir):
-    st.sidebar.error(f"Error: './data' is a file, not a folder. Please create a 'data' subfolder.")
-    app_ready = False
+# This check is no longer needed as we check the current folder
+# elif not os.path.isdir(data_dir):
+#     st.sidebar.error(f"Error: './data' is a file, not a folder. Please create a 'data' subfolder.")
+#     app_ready = False
 else:
-    data_files = os.listdir(data_dir)
+    data_files = os.listdir(data_dir) # Look in current folder
     offline_symbols = list(set([f.split('_')[0] for f in data_files if f.endswith('.csv')]))
     offline_symbols.sort()
+# --- **** END OF CHECKING **** ---
 
+# Find XAUUSD to set as default, otherwise default to first in list
 default_symbol_index = 0
 if "XAUUSD" in offline_symbols:
     default_symbol_index = offline_symbols.index("XAUUSD")
+
 
 if data_source == "Offline File":
     if not offline_symbols:
@@ -696,8 +716,8 @@ if app_ready:
                 if symbol_info is None:
                     st.warning(f"Could not get symbol info for {symbol} (MT5 not connected?). Using fallback defaults for lot sizing.")
                     
-                   # --- **** CRYPTO FIX (v2): Correct fallback logic **** ---
-                    if symbol == "XAUUSD":
+                    # --- **** CRYPTO FIX (v3): Correct fallback logic **** ---
+                     if symbol == "XAUUSD":
                         symbol_info = {'pip_size': 0.01, 'point': 0.01, 'lot_value_per_point': 100.0, 'digits': 2}
                     elif symbol in ["BTCUSD"]: # Crypto
                          symbol_info = {'pip_size': 0.01, 'point': 0.01, 'lot_value_per_point': 1.0, 'digits': 2}
@@ -723,6 +743,10 @@ if app_ready:
                 else:
                     st.success(f"Backtest complete! Found {len(trades_df)} trades.")
                     
+                    # Store full df in session state for charting
+                    st.session_state['full_df'] = df
+                    st.session_state['trades_df'] = trades_df
+                    
                     insights = calculate_insights(trades_df, base_params['initial_equity'])
                     charts = create_charts(insights)
                     
@@ -737,7 +761,6 @@ if app_ready:
                     cols[1].metric("Win Rate (%)", f"{insights['win_rate']:.2f}")
                     cols[2].metric("Total Trades", f"{insights['total_trades']}")
                     cols[3].metric("Profit Factor", f"{insights['profit_factor']:.2f}", delta_color=pf_color)
-                    # --- **** FIX: Renamed Expectancy **** ---
                     cols[4].metric("Expectancy ($ / Trade)", f"{insights['expectancy']:.2f}", delta_color=exp_color)
                     cols[5].metric("Max Drawdown ($)", f"{insights['max_drawdown_usd']:,.2f}", delta_color="inverse")
                     
@@ -759,7 +782,6 @@ if app_ready:
                     # 8. Display Trade Log
                     st.header("Full Trade Log")
                     
-                    # --- **** NEW: Download Button **** ---
                     @st.cache_data
                     def convert_df_to_csv(df):
                         return df.to_csv().encode('utf-8')
@@ -772,31 +794,24 @@ if app_ready:
                         mime="text/csv",
                     )
                     
-                    # --- **** NEW: Interactive Trade Log with Charts **** ---
-                    st.warning("Displaying the full trade log with chart buttons may be slow if there are 1000+ trades.")
-                    
-                    # --- **** FIX: Added 'lot' to the display **** ---
+                    # --- Added 'lot' to the display ---
                     display_cols = ['entry_time', 'exit_time', 'side', 'lot', 'entry', 'sl', 'tp', 'exit', 'result', 'pnl']
                     st.dataframe(trades_df[display_cols])
 
                     st.subheader("Individual Trade Charts")
+                    st.warning("Click the expander to generate and view the chart for a specific trade.")
                     
                     # Create a container for each chart
-                    # This uses the trade ID (index) for unique keys
                     for trade_id, trade in trades_df.iterrows():
                         expander = st.expander(f"Trade #{trade_id}: {trade['side']} | PnL: ${trade['pnl']:.2f} | Reason: {trade['reason']}")
                         with expander:
                             # We generate the chart *only* when the user clicks
                             try:
-                                fig = plot_trade_chart(df, trade, symbol)
+                                # Convert trade Series to dict for caching
+                                fig = plot_trade_chart(df, trade.to_dict(), symbol)
                                 st.pyplot(fig)
                             except Exception as e:
                                 st.error(f"Could not plot chart for trade #{trade_id}: {e}")
 
     else:
-
         st.info("Configuration set. Click 'Start Backtest' in the sidebar to run your analysis.")
-        
-
-
-
