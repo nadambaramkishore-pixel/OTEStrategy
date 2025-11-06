@@ -22,7 +22,7 @@ import mplfinance as mpf
 try:
     import MetaTrader5 as mt5
     MT5_ENABLED = True
-except ImportError:
+except (ImportError, ModuleNotFoundError): # Catch both errors
     print("MetaTrader5 library not found. Running in Offline-Only mode.")
     MT5_ENABLED = False
 # --- **** END OF FIX **** ---
@@ -68,10 +68,8 @@ def get_symbol_info(symbol):
     point = info.point
     if "XAU" in symbol or "XAG" in symbol:
         pip_size = 0.01
-    elif symbol in ["BTCUSD"]:
+    elif symbol in ["BTCUSD", "ETHUSD"]:
          pip_size = 0.01
-    elif symbol in ["ETHUSD"]:
-         pip_size = 0.0001
     elif info.digits == 5 or info.digits == 3:
         pip_size = point * 10
     else:
@@ -80,10 +78,10 @@ def get_symbol_info(symbol):
     # --- Determine Lot Value (Corrected) ---
     if symbol == "XAUUSD":
         lot_value_per_point = 100.0
-    elif symbol in ["BTCUSD"]:
+    elif symbol == "ETHUSD":
+        lot_value_per_point = 10.0
+    elif symbol == "BTCUSD":
         lot_value_per_point = 1.0 # 1 lot = 1 coin, $1 move = $1 profit
-    elif symbol in ["ETHUSD"]:
-        lot_value_per_point = 10.0 
     elif "USD" in symbol: # Forex
         lot_value_per_point = 100000.0
     else:
@@ -92,12 +90,17 @@ def get_symbol_info(symbol):
             lot_value_per_point = info.trade_tick_value / info.trade_tick_size
         else:
              lot_value_per_point = 1.0
+    
+    # --- Determine Digits ---
+    digits = info.digits
+    if symbol == "ETHUSD":
+        digits = 2 # Your value
         
     return {
         'pip_size': pip_size,
         'point': point,
         'lot_value_per_point': lot_value_per_point,
-        'digits': info.digits
+        'digits': digits
     }
 
 # -----------------------------------------------------------------
@@ -460,16 +463,17 @@ def calculate_insights(df_trades, initial_equity):
     df_trades['drawdown_usd'] = df_trades['equity_curve'] - df_trades['peak']
     max_drawdown_usd = df_trades['drawdown_usd'].min()
     
-    # --- **** FIX: Timestamps are already naive, no need to localize **** ---
-    df_trades['duration'] = (df_trades['exit_time'] - df_trades['entry_time'])
+    df_trades['entry_time_naive'] = pd.to_datetime(df_trades['entry_time']).dt.tz_localize(None)
+    df_trades['exit_time_naive'] = pd.to_datetime(df_trades['exit_time']).dt.tz_localize(None)
+    df_trades['duration'] = (df_trades['exit_time_naive'] - df_trades['entry_time_naive'])
     avg_duration = df_trades['duration'].mean()
     
     side_performance = df_trades.groupby('side')['pnl'].sum()
-    day_of_week_performance = df_trades.groupby(df_trades['entry_time'].dt.day_name())['pnl'].sum()
+    day_of_week_performance = df_trades.groupby(df_trades['entry_time_naive'].dt.day_name())['pnl'].sum()
     days_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
     day_of_week_performance = day_of_week_performance.reindex(days_order).fillna(0)
     
-    hour_of_day_performance = df_trades.groupby(df_trades['entry_time'].dt.hour)['pnl'].sum().sort_index()
+    hour_of_day_performance = df_trades.groupby(df_trades['entry_time_naive'].dt.hour)['pnl'].sum().sort_index()
 
     return {
         'net_pnl': net_pnl, 'total_trades': total_trades, 'win_rate': win_rate,
@@ -479,10 +483,11 @@ def calculate_insights(df_trades, initial_equity):
         'side_performance': side_performance,
         'day_of_week_performance': day_of_week_performance,
         'hour_of_day_performance': hour_of_day_performance,
-        'equity_curve': df_trades[['exit_time', 'equity_curve', 'peak']],
-        'drawdown_curve': df_trades[['exit_time', 'drawdown_usd']],
+        'equity_curve': df_trades[['exit_time_naive', 'equity_curve', 'peak']].rename(columns={'exit_time_naive': 'exit_time'}),
+        'drawdown_curve': df_trades[['exit_time_naive', 'drawdown_usd']].rename(columns={'exit_time_naive': 'exit_time'}),
         'pnl_distribution': df_trades['pnl']
     }
+
 def create_charts(insights):
     """Generates all Plotly charts from the insights dictionary."""
     charts = {}
@@ -529,53 +534,40 @@ def plot_trade_chart( _df_full, trade_data_dict, symbol ):
     exit_time = pd.to_datetime(trade['exit_time']).tz_localize('UTC')
 
     # --- **** THIS IS THE FIX (v12) **** ---
-    # 1. Find bar index locations (in *main* df)
-    # We must use get_indexer with method='nearest'
-    try:
-        pos_entry = _df_full.index.get_loc(entry_time, method='nearest')
-    except KeyError:
-        pos_entry = _df_full.index.get_indexer([entry_time], method='nearest')[0]
+    pos_entry = _df_full.index.get_indexer([entry_time], method='nearest')[0]
+    pos_exit = _df_full.index.get_indexer([exit_time], method='nearest')[0]
 
-    try:
-        pos_exit = _df_full.index.get_loc(exit_time, method='nearest')
-    except KeyError:
-        pos_exit = _df_full.index.get_indexer([exit_time], method='nearest')[0]
-
-    # Widen chart area to make space for labels
     left = max(0, pos_entry - 30)
     right = min(len(_df_full) - 1, pos_exit + 15)
     seg = _df_full.iloc[left:right + 1].copy()
 
-    # 2. Find local index for plotting (in *seg* df)
-    # The local index is just the global position minus the start of the segment.
-    entry_idx_local = pos_entry - left
-    exit_idx_local = pos_exit - left
+    entry_idx_local = _df_full.index.get_indexer([entry_time], method='nearest')[0] - left
+    exit_idx_local = _df_full.index.get_indexer([exit_time], method='nearest')[0] - left
     # --- **** END OF FIX **** ---
     
     hlines_to_plot = []
     hcolors = []
     hstyles = []
     
-    swing_low = trade.get('swing_low')
-    swing_high = trade.get('swing_high')
+    # --- **** FIB LINES COMMENTED OUT **** ---
+    # swing_low = trade.get('swing_low')
+    # swing_high = trade.get('swing_high')
+    # fib_levels_data = []
     
-    fib_levels_data = []
-    
-    if swing_low and swing_high:
-        swing_range = swing_high - swing_low
-        
-        fib_levels_data = [
-            (swing_low, f"Swing Low (0.0)", '#E53935', '--'),
-            (swing_low + swing_range * 0.5, "0.5", '#1E88E5', 'dotted'),
-            (swing_low + swing_range * 0.618, "0.618 (OTE)", '#4CAF50', 'dotted'),
-            (swing_low + swing_range * 0.786, "0.786 (OTE)", '#4CAF50', 'dotted'),
-            (swing_high, f"Swing High (1.0)", '#E53935', '--')
-        ]
-        
-        for level, _, color, style in fib_levels_data:
-            hlines_to_plot.append(level)
-            hcolors.append(color)
-            hstyles.append(style)
+    # if swing_low and swing_high:
+    #     swing_range = swing_high - swing_low
+    #     fib_levels_data = [
+    #         (swing_low, f"Swing Low (0.0)", '#E53935', '--'),
+    #         (swing_low + swing_range * 0.5, "0.5", '#1E88E5', 'dotted'),
+    #         (swing_low + swing_range * 0.618, "0.618 (OTE)", '#4CAF50', 'dotted'),
+    #         (swing_low + swing_range * 0.786, "0.786 (OTE)", '#4CAF50', 'dotted'),
+    #         (swing_high, f"Swing High (1.0)", '#E53935', '--')
+    #     ]
+    #     for level, _, color, style in fib_levels_data:
+    #         hlines_to_plot.append(level)
+    #         hcolors.append(color)
+    #         hstyles.append(style)
+    # --- **** END OF FIB LINES **** ---
     
     fig, axlist = mpf.plot(
         seg,
@@ -601,9 +593,11 @@ def plot_trade_chart( _df_full, trade_data_dict, symbol ):
 
     label_x_pos = len(seg) - 0.5
     
-    for level, label, color, _ in fib_levels_data:
-        ax.text(label_x_pos, level, f" {label}", 
-                color=color, va='center', ha='left', fontsize=9, fontweight='bold')
+    # --- **** FIB LABELS COMMENTED OUT **** ---
+    # for level, label, color, _ in fib_levels_data:
+    #     ax.text(label_x_pos, level, f" {label}", 
+    #             color=color, va='center', ha='left', fontsize=9, fontweight='bold')
+    # --- **** END OF FIB LABELS **** ---
                 
     ax.text(label_x_pos, trade['tp'], f" TP ({trade['tp']:.2f})", 
             color='#0f9d58', va='center', ha='left', fontsize=9, fontweight='bold')
@@ -619,6 +613,7 @@ def plot_trade_chart( _df_full, trade_data_dict, symbol ):
     fig.tight_layout()
     
     return fig
+
 # -----------------------------------------------------------------
 # STREAMLIT APP UI
 # -----------------------------------------------------------------
@@ -628,37 +623,30 @@ st.title("⚡ OTE Liquidity Sweep Strategy Dashboard")
 # --- SIDEBAR INPUTS ---
 st.sidebar.header("Backtest Configuration")
 
-# --- **** FIX: Only show 'Live MT5' if the library imported successfully **** ---
+# --- FIX: Only show 'Live MT5' if the library imported successfully ---
 data_source_options = ["Offline File"]
 if MT5_ENABLED:
     data_source_options.append("Live MT5")
 
-data_source = st.sidebar.selectbox("Data Source", data_source_options)
+data_source = st.sidebar.selectbox("Data Source", data_source_options, index=0) # Default to Offline
 if data_source == "Live MT5" and not MT5_ENABLED:
     st.sidebar.error("Live MT5 mode is not available (library failed to import).")
     st.stop()
-# --- **** END OF FIX **** ---
+
 
 # --- ROBUST FOLDER/FILE CHECKING ---
 offline_symbols = []
-data_dir = './' # --- FIX: Look in current folder, not /data
+data_dir = './' # Look in current folder
 app_ready = True
 
 if not os.path.exists(data_dir):
-    st.sidebar.error(f"Error: The 'data' subfolder was not found. Please create it.")
-    st.error("The './data' subfolder is missing. Please create it in the same directory as 'app.py' and add your CSV files.")
+    st.sidebar.error(f"Error: The app folder was not found.")
     app_ready = False
-# This check is no longer needed as we check the current folder
-# elif not os.path.isdir(data_dir):
-#     st.sidebar.error(f"Error: './data' is a file, not a folder. Please create a 'data' subfolder.")
-#     app_ready = False
 else:
     data_files = os.listdir(data_dir) # Look in current folder
     offline_symbols = list(set([f.split('_')[0] for f in data_files if f.endswith('.csv')]))
     offline_symbols.sort()
-# --- **** END OF CHECKING **** ---
 
-# Find XAUUSD to set as default, otherwise default to first in list
 default_symbol_index = 0
 if "XAUUSD" in offline_symbols:
     default_symbol_index = offline_symbols.index("XAUUSD")
@@ -666,8 +654,8 @@ if "XAUUSD" in offline_symbols:
 
 if data_source == "Offline File":
     if not offline_symbols:
-        st.sidebar.error("No CSV files found in the 'data' folder.")
-        st.info("Please add your exported data (e.g., 'XAUUSD_M5.csv') to the './data' folder and refresh the page.")
+        st.sidebar.error("No CSV files found in this folder.")
+        st.info("Please add your exported data (e.g., 'XAUUSD_M5.csv') to this folder and refresh.")
         app_ready = False
     else:
         symbol = st.sidebar.selectbox("Select Symbol", offline_symbols, index=default_symbol_index)
@@ -717,17 +705,17 @@ if app_ready:
                 if symbol_info is None:
                     st.warning(f"Could not get symbol info for {symbol} (MT5 not connected?). Using fallback defaults for lot sizing.")
                     
-                 # --- **** CRYPTO FIX (v3): Correct fallback logic **** ---
-                if symbol == "XAUUSD":
-                    symbol_info = {'pip_size': 0.01, 'point': 0.01, 'lot_value_per_point': 100.0, 'digits': 2}
-                elif symbol in ["BTCUSD"]: # Crypto
-                    symbol_info = {'pip_size': 0.01, 'point': 0.01, 'lot_value_per_point': 1.0, 'digits': 2}
-                elif symbol in ["ETHUSD"]: # Crypto
-                    symbol_info = {'pip_size': 0.01, 'point': 0.0001, 'lot_value_per_point': 10.0, 'digits': 2}
-                elif "USD" in symbol: # Forex
-                    symbol_info = {'pip_size': 0.0001, 'point': 0.00001, 'lot_value_per_point': 100000.0, 'digits': 5}
-                else: # Other fallback
-                    symbol_info = {'pip_size': 0.01, 'point': 0.01, 'lot_value_per_point': 1.0, 'digits': 2}
+                    # --- **** CRYPTO FIX (v4): Correct fallback logic for ETHUSD **** ---
+                    if symbol == "XAUUSD":
+                        symbol_info = {'pip_size': 0.01, 'point': 0.01, 'lot_value_per_point': 100.0, 'digits': 2}
+                    elif symbol == "ETHUSD": # Crypto
+                         symbol_info = {'pip_size': 0.01, 'point': 0.0001, 'lot_value_per_point': 10.0, 'digits': 2}
+                    elif symbol == "BTCUSD": # Crypto
+                         symbol_info = {'pip_size': 0.01, 'point': 0.01, 'lot_value_per_point': 1.0, 'digits': 2}
+                    elif "USD" in symbol: # Forex
+                        symbol_info = {'pip_size': 0.0001, 'point': 0.00001, 'lot_value_per_point': 100000.0, 'digits': 5}
+                    else: # Other fallback
+                         symbol_info = {'pip_size': 0.01, 'point': 0.01, 'lot_value_per_point': 1.0, 'digits': 2}
                 
                 # 3. Run Backtest
                 trades_df = run_backtest(
@@ -795,8 +783,7 @@ if app_ready:
                         mime="text/csv",
                     )
                     
-                    # --- Added 'lot' to the display ---
-                    display_cols = ['entry_time', 'exit_time', 'side', 'lot', 'entry', 'sl', 'tp', 'exit', 'result', 'pnl']
+                    display_cols = ['entry_time', 'exit_time', 'side', 'lot', 'entry', 'sl', 'tp', 'exit', 'result', 'pnl', 'reason']
                     st.dataframe(trades_df[display_cols])
 
                     st.subheader("Individual Trade Charts")
@@ -816,5 +803,3 @@ if app_ready:
 
     else:
         st.info("Configuration set. Click 'Start Backtest' in the sidebar to run your analysis.")
-
-
