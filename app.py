@@ -6,7 +6,7 @@
 # 2. Open terminal in this folder
 # 3. Run: streamlit run app.py
 
-import MetaTrader5 as mt5
+#import MetaTrader5 as mt5
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta, timezone, time
@@ -797,3 +797,4 @@ if app_ready:
 
         st.info("Configuration set. Click 'Start Backtest' in the sidebar to run your analysis.")
         
+
