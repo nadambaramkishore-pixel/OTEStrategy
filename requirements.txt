@@ -3,3 +3,4 @@ pandas
 plotly
 MetaTrader5
 mplfinance
+matplotlib
