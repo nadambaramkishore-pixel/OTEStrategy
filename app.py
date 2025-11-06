@@ -794,4 +794,6 @@ if app_ready:
                                 st.error(f"Could not plot chart for trade #{trade_id}: {e}")
 
     else:
+
         st.info("Configuration set. Click 'Start Backtest' in the sidebar to run your analysis.")
+        
