@@ -460,17 +460,16 @@ def calculate_insights(df_trades, initial_equity):
     df_trades['drawdown_usd'] = df_trades['equity_curve'] - df_trades['peak']
     max_drawdown_usd = df_trades['drawdown_usd'].min()
     
-    df_trades['entry_time_naive'] = pd.to_datetime(df_trades['entry_time']).dt.tz_localize(None)
-    df_trades['exit_time_naive'] = pd.to_datetime(df_trades['exit_time']).dt.tz_localize(None)
-    df_trades['duration'] = (df_trades['exit_time_naive'] - df_trades['entry_time_naive'])
+    # --- **** FIX: Timestamps are already naive, no need to localize **** ---
+    df_trades['duration'] = (df_trades['exit_time'] - df_trades['entry_time'])
     avg_duration = df_trades['duration'].mean()
     
     side_performance = df_trades.groupby('side')['pnl'].sum()
-    day_of_week_performance = df_trades.groupby(df_trades['entry_time_naive'].dt.day_name())['pnl'].sum()
+    day_of_week_performance = df_trades.groupby(df_trades['entry_time'].dt.day_name())['pnl'].sum()
     days_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
     day_of_week_performance = day_of_week_performance.reindex(days_order).fillna(0)
     
-    hour_of_day_performance = df_trades.groupby(df_trades['entry_time_naive'].dt.hour)['pnl'].sum().sort_index()
+    hour_of_day_performance = df_trades.groupby(df_trades['entry_time'].dt.hour)['pnl'].sum().sort_index()
 
     return {
         'net_pnl': net_pnl, 'total_trades': total_trades, 'win_rate': win_rate,
@@ -480,11 +479,10 @@ def calculate_insights(df_trades, initial_equity):
         'side_performance': side_performance,
         'day_of_week_performance': day_of_week_performance,
         'hour_of_day_performance': hour_of_day_performance,
-        'equity_curve': df_trades[['exit_time_naive', 'equity_curve', 'peak']].rename(columns={'exit_time_naive': 'exit_time'}),
-        'drawdown_curve': df_trades[['exit_time_naive', 'drawdown_usd']].rename(columns={'exit_time_naive': 'exit_time'}),
+        'equity_curve': df_trades[['exit_time', 'equity_curve', 'peak']],
+        'drawdown_curve': df_trades[['exit_time', 'drawdown_usd']],
         'pnl_distribution': df_trades['pnl']
     }
-
 def create_charts(insights):
     """Generates all Plotly charts from the insights dictionary."""
     charts = {}
@@ -530,6 +528,9 @@ def plot_trade_chart( _df_full, trade_data_dict, symbol ):
     entry_time = pd.to_datetime(trade['entry_time']).tz_localize('UTC')
     exit_time = pd.to_datetime(trade['exit_time']).tz_localize('UTC')
 
+    # --- **** THIS IS THE FIX (v12) **** ---
+    # 1. Find bar index locations (in *main* df)
+    # We must use get_indexer with method='nearest'
     try:
         pos_entry = _df_full.index.get_loc(entry_time, method='nearest')
     except KeyError:
@@ -540,19 +541,16 @@ def plot_trade_chart( _df_full, trade_data_dict, symbol ):
     except KeyError:
         pos_exit = _df_full.index.get_indexer([exit_time], method='nearest')[0]
 
+    # Widen chart area to make space for labels
     left = max(0, pos_entry - 30)
     right = min(len(_df_full) - 1, pos_exit + 15)
     seg = _df_full.iloc[left:right + 1].copy()
 
-    try:
-        entry_idx_local = seg.index.get_loc(entry_time, method='nearest')
-    except KeyError:
-        entry_idx_local = seg.index.get_indexer([entry_time], method='nearest')[0]
-        
-    try:
-        exit_idx_local = seg.index.get_loc(exit_time, method='nearest')
-    except KeyError:
-        exit_idx_local = seg.index.get_indexer([exit_time], method='nearest')[0]
+    # 2. Find local index for plotting (in *seg* df)
+    # The local index is just the global position minus the start of the segment.
+    entry_idx_local = pos_entry - left
+    exit_idx_local = pos_exit - left
+    # --- **** END OF FIX **** ---
     
     hlines_to_plot = []
     hcolors = []
@@ -566,13 +564,13 @@ def plot_trade_chart( _df_full, trade_data_dict, symbol ):
     if swing_low and swing_high:
         swing_range = swing_high - swing_low
         
-        # fib_levels_data = [
-        #     (swing_low, f"Swing Low (0.0)", '#E53935', '--'),
-        #     (swing_low + swing_range * 0.5, "0.5", '#1E88E5', 'dotted'),
-        #     (swing_low + swing_range * 0.618, "0.618 (OTE)", '#4CAF50', 'dotted'),
-        #     (swing_low + swing_range * 0.786, "0.786 (OTE)", '#4CAF50', 'dotted'),
-        #     (swing_high, f"Swing High (1.0)", '#E53935', '--')
-        # ]
+        fib_levels_data = [
+            (swing_low, f"Swing Low (0.0)", '#E53935', '--'),
+            (swing_low + swing_range * 0.5, "0.5", '#1E88E5', 'dotted'),
+            (swing_low + swing_range * 0.618, "0.618 (OTE)", '#4CAF50', 'dotted'),
+            (swing_low + swing_range * 0.786, "0.786 (OTE)", '#4CAF50', 'dotted'),
+            (swing_high, f"Swing High (1.0)", '#E53935', '--')
+        ]
         
         for level, _, color, style in fib_levels_data:
             hlines_to_plot.append(level)
@@ -621,7 +619,6 @@ def plot_trade_chart( _df_full, trade_data_dict, symbol ):
     fig.tight_layout()
     
     return fig
-
 # -----------------------------------------------------------------
 # STREAMLIT APP UI
 # -----------------------------------------------------------------
@@ -819,4 +816,5 @@ if app_ready:
 
     else:
         st.info("Configuration set. Click 'Start Backtest' in the sidebar to run your analysis.")
+
 
