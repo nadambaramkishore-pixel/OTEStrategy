@@ -671,7 +671,7 @@ else:
     timeframe = st.sidebar.selectbox("Timeframe", ["M5", "M15", "H1"])
 
 # This slider now controls both modes
-months_to_test = st.sidebar.slider("Months to Backtest", 1, 36, 9)
+months_to_test = st.sidebar.slider("Months to Backtest", 1, 9, 9)
 # --- **** END OF FIX **** ---
 
 
@@ -813,3 +813,4 @@ if app_ready:
 
     else:
         st.info("Configuration set. Click 'Start Backtest' in the sidebar to run your analysis.")
+
