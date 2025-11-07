@@ -1,30 +1,29 @@
 # app.py
-# OTE Strategy Dashboard v2.6 (Universal "Months to Backtest" Slider)
+# OTE Strategy Dashboard v2.7 (Streamlit Cloud & Offline Slider Fix)
 #
 # To run:
 # 1. Make sure MT5 terminal is running (for Live Mode)
 # 2. Open terminal in this folder
 # 3. Run: streamlit run app.py
 
-import MetaTrader5 as mt5
+import streamlit as st
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta, timezone, time
 import plotly.graph_objects as go
 import plotly.express as px
-import streamlit as st
 import os
 import matplotlib.pyplot as plt
 import mplfinance as mpf
 
-# --- **** THIS IS THE FIX **** ---
+# --- **** THIS IS THE FIX FOR STREAMLIT CLOUD **** ---
 # Try to import MetaTrader5. If it fails (like on Streamlit Cloud),
 # set a flag and continue.
 try:
     import MetaTrader5 as mt5
     MT5_ENABLED = True
-except (ImportError, ModuleNotFoundError): # Catch both errors
-    print("MetaTrader5 library not found. Running in Offline-Only mode.")
+except (ImportError, ModuleNotFoundError, RuntimeError): # Catch all possible import errors
+    print("MetaTrader5 library not found or failed to import. Running in Offline-Only mode.")
     MT5_ENABLED = False
 # --- **** END OF FIX **** ---
 
@@ -138,7 +137,7 @@ def fetch_mt5_data(symbol, timeframe, months):
 
 def load_offline_data(symbol, timeframe, months_to_test):
     """Loads data from a pre-exported CSV file."""
-    # Look in current folder (./), not ./data/
+    # --- FIX: Look in current folder (./), not ./data/ ---
     filename = f"{symbol}_{timeframe}.csv" 
     if not os.path.exists(filename):
         st.error(f"Data file not found: {filename}. Please make sure it's in the same folder as app.py.")
@@ -571,7 +570,7 @@ def plot_trade_chart( _df_full, trade_data_dict, symbol ):
     #         (swing_high, f"Swing High (1.0)", '#E53935', '--')
     #     ]
     #     for level, _, color, style in fib_levels_data:
-    S    #         hlines_to_plot.append(level)
+    #         hlines_to_plot.append(level)
     #         hcolors.append(color)
     #         hstyles.append(style)
     # --- **** END OF FIB LINES **** ---
@@ -658,7 +657,7 @@ default_symbol_index = 0
 if "XAUUSD" in offline_symbols:
     default_symbol_index = offline_symbols.index("XAUUSD")
 
-
+# --- **** THIS IS THE FIX: Months slider is now universal **** ---
 if data_source == "Offline File":
     if not offline_symbols:
         st.sidebar.error("No CSV files found in this folder.")
@@ -667,13 +666,13 @@ if data_source == "Offline File":
     else:
         symbol = st.sidebar.selectbox("Select Symbol", offline_symbols, index=default_symbol_index)
         timeframe = "M5" # Hardcoded
-        # --- **** FIX: Added months_to_test slider for Offline Mode **** ---
-        months_to_test = st.sidebar.slider("Months to Backtest", 1, 24, 9)
 else:
     symbol = st.sidebar.text_input("Symbol", "XAUUSD")
     timeframe = st.sidebar.selectbox("Timeframe", ["M5", "M15", "H1"])
-    # --- **** FIX: This slider is now global **** ---
-    months_to_test = st.sidebar.slider("Months to Backtest", 1, 24, 9)
+
+# This slider now controls both modes
+months_to_test = st.sidebar.slider("Months to Backtest", 1, 36, 9)
+# --- **** END OF FIX **** ---
 
 
 # Get parameters from Python's BASE config
@@ -703,7 +702,6 @@ if app_ready:
             if data_source == "Live MT5":
                 df, test_start_date = fetch_mt5_data(symbol, timeframe, months_to_test)
             else: # Offline File
-                # --- **** FIX: Pass months_to_test to offline loader **** ---
                 df, test_start_date = load_offline_data(symbol, timeframe, months_to_test)
 
             if df is None:
