@@ -1,17 +1,18 @@
 # app.py
-# OTE Strategy Dashboard v2.5 (Slider Fix)
+# OTE Strategy Dashboard v2.6 (Universal "Months to Backtest" Slider)
 #
 # To run:
 # 1. Make sure MT5 terminal is running (for Live Mode)
 # 2. Open terminal in this folder
 # 3. Run: streamlit run app.py
 
-import streamlit as st
+import MetaTrader5 as mt5
 import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta, timezone, time
 import plotly.graph_objects as go
 import plotly.express as px
+import streamlit as st
 import os
 import matplotlib.pyplot as plt
 import mplfinance as mpf
@@ -68,9 +69,7 @@ def get_symbol_info(symbol):
     point = info.point
     if "XAU" in symbol or "XAG" in symbol:
         pip_size = 0.01
-    elif symbol in ["BTCUSD"]:
-         pip_size = 0.01
-    elif symbol in ["ETHUSD"]:
+    elif symbol in ["BTCUSD", "ETHUSD"]:
          pip_size = 0.01
     elif info.digits == 5 or info.digits == 3:
         pip_size = point * 10
@@ -137,9 +136,9 @@ def fetch_mt5_data(symbol, timeframe, months):
     
     return df, test_start_date
 
-def load_offline_data(symbol, timeframe):
+def load_offline_data(symbol, timeframe, months_to_test):
     """Loads data from a pre-exported CSV file."""
-    # --- FIX: Look in current folder (./), not ./data/ ---
+    # Look in current folder (./), not ./data/
     filename = f"{symbol}_{timeframe}.csv" 
     if not os.path.exists(filename):
         st.error(f"Data file not found: {filename}. Please make sure it's in the same folder as app.py.")
@@ -201,7 +200,17 @@ def load_offline_data(symbol, timeframe):
         df = df[required_cols]
         df.set_index('time', inplace=True)
         
-        test_start_date = df.index[200] 
+        # --- **** NEW: Calculate Test Start Date based on slider **** ---
+        end_date = df.index[-1] # Get the last date in the file
+        test_start_date = end_date - timedelta(days=30 * months_to_test)
+        
+        # Ensure we still have enough data for warmup
+        min_start_date = df.index[200]
+        if test_start_date < min_start_date:
+            st.warning(f"Warning: Selected period ({months_to_test} months) is too large for the data file. "
+                       f"Starting test from the earliest possible date ({min_start_date.date()}) to ensure indicator warmup.")
+            test_start_date = min_start_date
+        
         return df, test_start_date
         
     except Exception as e:
@@ -533,7 +542,6 @@ def plot_trade_chart( _df_full, trade_data_dict, symbol ):
     entry_time = pd.to_datetime(trade['entry_time']).tz_localize('UTC')
     exit_time = pd.to_datetime(trade['exit_time']).tz_localize('UTC')
 
-    # --- **** THIS IS THE FIX (v12) **** ---
     pos_entry = _df_full.index.get_indexer([entry_time], method='nearest')[0]
     pos_exit = _df_full.index.get_indexer([exit_time], method='nearest')[0]
 
@@ -543,7 +551,6 @@ def plot_trade_chart( _df_full, trade_data_dict, symbol ):
 
     entry_idx_local = _df_full.index.get_indexer([entry_time], method='nearest')[0] - left
     exit_idx_local = _df_full.index.get_indexer([exit_time], method='nearest')[0] - left
-    # --- **** END OF FIX **** ---
     
     hlines_to_plot = []
     hcolors = []
@@ -564,7 +571,7 @@ def plot_trade_chart( _df_full, trade_data_dict, symbol ):
     #         (swing_high, f"Swing High (1.0)", '#E53935', '--')
     #     ]
     #     for level, _, color, style in fib_levels_data:
-    #         hlines_to_plot.append(level)
+    S    #         hlines_to_plot.append(level)
     #         hcolors.append(color)
     #         hstyles.append(style)
     # --- **** END OF FIB LINES **** ---
@@ -651,7 +658,7 @@ default_symbol_index = 0
 if "XAUUSD" in offline_symbols:
     default_symbol_index = offline_symbols.index("XAUUSD")
 
-# --- **** THIS IS THE FIX: Added months_to_test to sidebar **** ---
+
 if data_source == "Offline File":
     if not offline_symbols:
         st.sidebar.error("No CSV files found in this folder.")
@@ -660,12 +667,13 @@ if data_source == "Offline File":
     else:
         symbol = st.sidebar.selectbox("Select Symbol", offline_symbols, index=default_symbol_index)
         timeframe = "M5" # Hardcoded
-        months_to_test = 0 # Not used for offline
+        # --- **** FIX: Added months_to_test slider for Offline Mode **** ---
+        months_to_test = st.sidebar.slider("Months to Backtest", 1, 24, 9)
 else:
     symbol = st.sidebar.text_input("Symbol", "XAUUSD")
     timeframe = st.sidebar.selectbox("Timeframe", ["M5", "M15", "H1"])
+    # --- **** FIX: This slider is now global **** ---
     months_to_test = st.sidebar.slider("Months to Backtest", 1, 24, 9)
-# --- **** END OF FIX **** ---
 
 
 # Get parameters from Python's BASE config
@@ -695,7 +703,8 @@ if app_ready:
             if data_source == "Live MT5":
                 df, test_start_date = fetch_mt5_data(symbol, timeframe, months_to_test)
             else: # Offline File
-                df, test_start_date = load_offline_data(symbol, timeframe)
+                # --- **** FIX: Pass months_to_test to offline loader **** ---
+                df, test_start_date = load_offline_data(symbol, timeframe, months_to_test)
 
             if df is None:
                 st.error("Failed to load data. Backtest aborted.")
