@@ -1,5 +1,5 @@
 # app.py
-# OTE Strategy Dashboard v2.4 (Streamlit Cloud Fix)
+# OTE Strategy Dashboard v2.5 (Slider Fix)
 #
 # To run:
 # 1. Make sure MT5 terminal is running (for Live Mode)
@@ -465,17 +465,15 @@ def calculate_insights(df_trades, initial_equity):
     df_trades['drawdown_usd'] = df_trades['equity_curve'] - df_trades['peak']
     max_drawdown_usd = df_trades['drawdown_usd'].min()
     
-    df_trades['entry_time_naive'] = pd.to_datetime(df_trades['entry_time']).dt.tz_localize(None)
-    df_trades['exit_time_naive'] = pd.to_datetime(df_trades['exit_time']).dt.tz_localize(None)
-    df_trades['duration'] = (df_trades['exit_time_naive'] - df_trades['entry_time_naive'])
+    df_trades['duration'] = (df_trades['exit_time'] - df_trades['entry_time'])
     avg_duration = df_trades['duration'].mean()
     
     side_performance = df_trades.groupby('side')['pnl'].sum()
-    day_of_week_performance = df_trades.groupby(df_trades['entry_time_naive'].dt.day_name())['pnl'].sum()
+    day_of_week_performance = df_trades.groupby(df_trades['entry_time'].dt.day_name())['pnl'].sum()
     days_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
     day_of_week_performance = day_of_week_performance.reindex(days_order).fillna(0)
     
-    hour_of_day_performance = df_trades.groupby(df_trades['entry_time_naive'].dt.hour)['pnl'].sum().sort_index()
+    hour_of_day_performance = df_trades.groupby(df_trades['entry_time'].dt.hour)['pnl'].sum().sort_index()
 
     return {
         'net_pnl': net_pnl, 'total_trades': total_trades, 'win_rate': win_rate,
@@ -485,8 +483,8 @@ def calculate_insights(df_trades, initial_equity):
         'side_performance': side_performance,
         'day_of_week_performance': day_of_week_performance,
         'hour_of_day_performance': hour_of_day_performance,
-        'equity_curve': df_trades[['exit_time_naive', 'equity_curve', 'peak']].rename(columns={'exit_time_naive': 'exit_time'}),
-        'drawdown_curve': df_trades[['exit_time_naive', 'drawdown_usd']].rename(columns={'exit_time_naive': 'exit_time'}),
+        'equity_curve': df_trades[['exit_time', 'equity_curve', 'peak']],
+        'drawdown_curve': df_trades[['exit_time', 'drawdown_usd']],
         'pnl_distribution': df_trades['pnl']
     }
 
@@ -653,7 +651,7 @@ default_symbol_index = 0
 if "XAUUSD" in offline_symbols:
     default_symbol_index = offline_symbols.index("XAUUSD")
 
-
+# --- **** THIS IS THE FIX: Added months_to_test to sidebar **** ---
 if data_source == "Offline File":
     if not offline_symbols:
         st.sidebar.error("No CSV files found in this folder.")
@@ -662,11 +660,13 @@ if data_source == "Offline File":
     else:
         symbol = st.sidebar.selectbox("Select Symbol", offline_symbols, index=default_symbol_index)
         timeframe = "M5" # Hardcoded
-        months_to_test = 0
+        months_to_test = 0 # Not used for offline
 else:
     symbol = st.sidebar.text_input("Symbol", "XAUUSD")
     timeframe = st.sidebar.selectbox("Timeframe", ["M5", "M15", "H1"])
     months_to_test = st.sidebar.slider("Months to Backtest", 1, 24, 9)
+# --- **** END OF FIX **** ---
+
 
 # Get parameters from Python's BASE config
 base_params = {
@@ -805,4 +805,3 @@ if app_ready:
 
     else:
         st.info("Configuration set. Click 'Start Backtest' in the sidebar to run your analysis.")
-
