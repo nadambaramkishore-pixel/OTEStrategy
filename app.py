@@ -782,6 +782,7 @@ if app_ready:
                     
                     @st.cache_data
                     def convert_df_to_csv(df):
+                        # Make sure to include index (trade id) in CSV
                         return df.to_csv().encode('utf-8')
 
                     csv_data = convert_df_to_csv(trades_df)
